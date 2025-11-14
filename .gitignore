@@ -1,0 +1,10 @@
+data
+NIFTY50_Hourly_ML_LongShort_Assignment_v3.pdf
+__pycache__/
+*.py[cod]
+*.pkl
+*.parquet
+*.png
+*.json
+*.csv
+.DS_Store
