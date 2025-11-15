@@ -1,4 +1,3 @@
-from sklearn.linear_model import Ridge
 from xgboost import XGBClassifier, XGBRegressor
 
 from src.utils import config
@@ -25,7 +24,3 @@ def build_classification_model():
         verbosity=0,
         use_label_encoder=False,
     )
-
-
-def build_ridge_model():
-    return Ridge(alpha=config.RIDGE_ALPHA)

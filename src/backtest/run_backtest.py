@@ -359,45 +359,7 @@ def _trade_log_from_portfolio(pf):
         }
     )
     trade_log = trade_log.sort_values("timestamp").reset_index(drop=True)
-    trade_log = _apply_stop_loss(trade_log)
     return trade_log
-
-
-def _apply_stop_loss(trade_log):
-    if trade_log.empty:
-        return trade_log
-    stop = config.STOP_LOSS_PCT
-    entry_notional = trade_log["entry_price"].abs() * trade_log["quantity"].abs()
-    trade_log["entry_notional"] = entry_notional
-    if stop <= 0:
-        denom = entry_notional.replace(0, np.nan)
-        trade_log["pnl_pct"] = np.where(entry_notional > 0, trade_log["pnl"] / denom, 0.0)
-        trade_log["stop_triggered"] = False
-        return trade_log
-    max_loss = -stop * entry_notional
-    loss_mask = trade_log["pnl"] < max_loss
-    long_mask = (trade_log["side"] == "long") & loss_mask
-    short_mask = (trade_log["side"] == "short") & loss_mask
-    trade_log.loc[long_mask, "pnl"] = max_loss[long_mask]
-    trade_log.loc[long_mask, "exit_price"] = trade_log.loc[long_mask, "entry_price"] * (1 - stop)
-    trade_log.loc[short_mask, "pnl"] = max_loss[short_mask]
-    trade_log.loc[short_mask, "exit_price"] = trade_log.loc[short_mask, "entry_price"] * (1 + stop)
-    denom = entry_notional.replace(0, np.nan)
-    trade_log["pnl_pct"] = np.where(entry_notional > 0, trade_log["pnl"] / denom, 0.0)
-    trade_log["stop_triggered"] = loss_mask
-    return trade_log
-
-
-def _rebuild_equity(trade_log):
-    nav = config.CAPITAL
-    equity_records = []
-    if trade_log.empty:
-        ts = pd.Timestamp.utcnow()
-        return pd.DataFrame([{"timestamp": ts, "nav": nav}])
-    for ts, pnl_sum in trade_log.groupby("timestamp")["pnl"].sum().sort_index().items():
-        nav += pnl_sum
-        equity_records.append({"timestamp": ts, "nav": nav})
-    return pd.DataFrame(equity_records)
 
 
 def run_backtest():
@@ -429,7 +391,8 @@ def run_backtest():
         raise RuntimeError("No valid weights were generated for the backtest.")
     pf = _build_vectorbt_portfolio(closings, weights)
     trade_log = _trade_log_from_portfolio(pf)
-    equity = _rebuild_equity(trade_log)
+    equity_series = pf.value()
+    equity = pd.DataFrame({"timestamp": equity_series.index, "nav": equity_series.values})
     if equity.empty:
         raise RuntimeError("Equity curve is empty, backtest failed.")
     paths.BACKTEST_DIR.mkdir(parents=True, exist_ok=True)

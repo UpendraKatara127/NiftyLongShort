@@ -157,6 +157,20 @@ def _cross_sectional_z(series):
     return series.groupby(level="datetime_hour").transform(transform)
 
 
+def _apply_time_series_zscore(features, window):
+    grouped = features.groupby(level="symbol", group_keys=False)
+
+    def transform(df):
+        rolling = df.rolling(window, min_periods=window)
+        mean = rolling.mean()
+        std = rolling.std(ddof=0)
+        return (df - mean) / std.replace(0, np.nan)
+
+    z = grouped.apply(transform)
+    z.index = z.index.set_names(["datetime_hour", "symbol"])
+    return z.sort_index()
+
+
 def build_feature_matrix(hourly):
     technical = compute_technical_features(hourly)
     statistical = build_statistical_features(hourly)
@@ -166,6 +180,7 @@ def build_feature_matrix(hourly):
     features = pd.concat([technical, statistical, regime, daily, micro], axis=1).sort_index()
     features = _add_cross_sectional_features(features)
     features = _add_sector_relative_features(features)
+    features = _apply_time_series_zscore(features, config.TIME_SERIES_ZSCORE_WINDOW)
     return features
 
 
