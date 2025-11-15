@@ -149,12 +149,28 @@ def _enforce_caps(weights):
     return weights
 
 
+def _score_entropy(scores):
+    if scores.empty:
+        return np.nan
+    shifted = scores - scores.max()
+    exp_scores = np.exp(shifted)
+    denom = exp_scores.sum()
+    if denom == 0:
+        return np.nan
+    probs = exp_scores / denom
+    entropy = -(probs * np.log(probs + 1e-12)).sum()
+    return entropy / np.log(len(probs))
+
+
 def _build_weights(score_df, ret_dispersion, dispersion_threshold, lambda_series, lambda_threshold, scale_factor, beta_table, sector_map):
     weights = pd.DataFrame(0.0, index=score_df.index, columns=score_df.columns)
     daily_turnover = {}
     for ts in score_df.index:
         scores = score_df.loc[ts].dropna()
         if scores.empty:
+            continue
+        entropy = _score_entropy(scores)
+        if pd.notna(entropy) and entropy > config.SCORE_ENTROPY_MAX:
             continue
         dispersion = ret_dispersion.get(ts, np.nan)
         if pd.notna(dispersion) and dispersion < dispersion_threshold:
@@ -336,13 +352,52 @@ def _trade_log_from_portfolio(pf):
             "side": side,
             "entry_price": records["entry_price"],
             "exit_price": records["exit_price"],
-            "quantity": records["size"],
+            "quantity": np.abs(records["size"]),
             "pnl": records["pnl"],
             "pnl_pct": records["return"],
             "entry_time": close_index[records["entry_idx"]],
         }
     )
-    return trade_log.sort_values("timestamp").reset_index(drop=True)
+    trade_log = trade_log.sort_values("timestamp").reset_index(drop=True)
+    trade_log = _apply_stop_loss(trade_log)
+    return trade_log
+
+
+def _apply_stop_loss(trade_log):
+    if trade_log.empty:
+        return trade_log
+    stop = config.STOP_LOSS_PCT
+    entry_notional = trade_log["entry_price"].abs() * trade_log["quantity"].abs()
+    trade_log["entry_notional"] = entry_notional
+    if stop <= 0:
+        denom = entry_notional.replace(0, np.nan)
+        trade_log["pnl_pct"] = np.where(entry_notional > 0, trade_log["pnl"] / denom, 0.0)
+        trade_log["stop_triggered"] = False
+        return trade_log
+    max_loss = -stop * entry_notional
+    loss_mask = trade_log["pnl"] < max_loss
+    long_mask = (trade_log["side"] == "long") & loss_mask
+    short_mask = (trade_log["side"] == "short") & loss_mask
+    trade_log.loc[long_mask, "pnl"] = max_loss[long_mask]
+    trade_log.loc[long_mask, "exit_price"] = trade_log.loc[long_mask, "entry_price"] * (1 - stop)
+    trade_log.loc[short_mask, "pnl"] = max_loss[short_mask]
+    trade_log.loc[short_mask, "exit_price"] = trade_log.loc[short_mask, "entry_price"] * (1 + stop)
+    denom = entry_notional.replace(0, np.nan)
+    trade_log["pnl_pct"] = np.where(entry_notional > 0, trade_log["pnl"] / denom, 0.0)
+    trade_log["stop_triggered"] = loss_mask
+    return trade_log
+
+
+def _rebuild_equity(trade_log):
+    nav = config.CAPITAL
+    equity_records = []
+    if trade_log.empty:
+        ts = pd.Timestamp.utcnow()
+        return pd.DataFrame([{"timestamp": ts, "nav": nav}])
+    for ts, pnl_sum in trade_log.groupby("timestamp")["pnl"].sum().sort_index().items():
+        nav += pnl_sum
+        equity_records.append({"timestamp": ts, "nav": nav})
+    return pd.DataFrame(equity_records)
 
 
 def run_backtest():
@@ -373,11 +428,8 @@ def run_backtest():
     if weights.abs().sum().sum() == 0:
         raise RuntimeError("No valid weights were generated for the backtest.")
     pf = _build_vectorbt_portfolio(closings, weights)
-    equity_series = pf.value()
-    equity = pd.DataFrame(
-        {"timestamp": equity_series.index, "nav": equity_series.values}
-    )
     trade_log = _trade_log_from_portfolio(pf)
+    equity = _rebuild_equity(trade_log)
     if equity.empty:
         raise RuntimeError("Equity curve is empty, backtest failed.")
     paths.BACKTEST_DIR.mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,11 @@ from sklearn.metrics import mean_squared_error, roc_auc_score
 
 from src.data_prep.build_panel import build_hourly_panel
 from src.features.make_dataset import FeaturePipeline, build_dataset
-from src.models.model_defs import build_classification_model, build_regression_model
+from src.models.model_defs import (
+    build_classification_model,
+    build_regression_model,
+    build_ridge_model,
+)
 from src.models.stacking import build_scores
 from src.utils import config, paths
 
@@ -115,17 +119,23 @@ def train_walkforward():
         X_test_proc = pipeline.transform(X_test)
         print(f"  Features transformed in {time.perf_counter() - t0:.2f}s", flush=True)
         reg_model = build_regression_model()
+        ridge_model = build_ridge_model()
         clf_model = build_classification_model()
         t1 = time.perf_counter()
         reg_model.fit(X_train_proc, y_train)
+        ridge_model.fit(X_train_proc, y_train)
         clf_model.fit(X_train_proc, y_class)
         print(f"  Models fit in {time.perf_counter() - t1:.2f}s", flush=True)
-        pred_ret = pd.Series(reg_model.predict(X_test_proc), index=X_test.index)
+        pred_ret_xgb = pd.Series(reg_model.predict(X_test_proc), index=X_test.index)
+        pred_ret_ridge = pd.Series(ridge_model.predict(X_test_proc), index=X_test.index)
+        pred_ret = (pred_ret_xgb + pred_ret_ridge) / 2
         pred_prob = pd.Series(clf_model.predict_proba(X_test_proc)[:, 1], index=X_test.index)
         score = build_scores(pred_ret, pred_prob)
         frame = pd.DataFrame(
             {
                 "pred_ret": pred_ret,
+                "pred_ret_xgb": pred_ret_xgb,
+                "pred_ret_ridge": pred_ret_ridge,
                 "pred_prob": pred_prob,
                 "score": score,
                 "target": y_test,
@@ -140,6 +150,7 @@ def train_walkforward():
         model_stamp = current_day.strftime("%Y%m%d")
         paths.MODELS_DIR.mkdir(parents=True, exist_ok=True)
         dump(reg_model, paths.MODELS_DIR / f"regressor_{model_stamp}.pkl")
+        dump(ridge_model, paths.MODELS_DIR / f"ridge_{model_stamp}.pkl")
         dump(clf_model, paths.MODELS_DIR / f"classifier_{model_stamp}.pkl")
         pipeline.save(paths.FEATURE_PIPELINE_DIR / f"pipeline_{model_stamp}.pkl")
         latest_pipeline = pipeline
@@ -191,8 +202,7 @@ def train_walkforward():
         with open(paths.MODELS_DIR / "feature_importance.json", "w", encoding="utf-8") as fp:
             json.dump({"regression": fi_reg, "classification": fi_clf}, fp, indent=2)
         shap_path = paths.MODELS_DIR / "shap_summary.png"
-        if feature_store is not None:
-            _shap_summary(reg_model, feature_store, shap_path)
+        # Skip automatic SHAP inside training; use scripts/run_shap.py instead.
     return signals
 
 

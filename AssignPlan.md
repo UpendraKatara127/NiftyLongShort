@@ -225,8 +225,8 @@ All regime probabilities and regime indicators become features.
 
 ### 5.1 Target
 
-- Regression target: `y` (next-hour return).  
-- Binary target for classification: `label = 1 if y > 0 else 0`.
+- Regression target: cross-sectional z-score of the next-hour log return across all NIFTY 50 constituents at each rebalance time.  
+- Binary target for classification: `label = 1 if z(log_ret_1h) > 0 else 0`.
 
 ### 5.2 Base Models
 
@@ -446,5 +446,4 @@ Final deliverables for the project:
   - ML metrics  
   - backtest results  
   - interpretation and limitations
-
 

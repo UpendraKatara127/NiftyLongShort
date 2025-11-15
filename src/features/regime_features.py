@@ -40,13 +40,6 @@ def build_regime_features(hourly):
     index_ret = ret_matrix.mean(axis=1).fillna(0)
     probs = _compute_regime_probs(index_ret, config.REGIME_WINDOW)
     vol = index_ret.rolling(config.VOL_LOOKBACK, min_periods=config.VOL_LOOKBACK).std()
-    bucket = pd.Series(index=index_ret.index, dtype="object")
-    low_thresh = config.VOL_BUCKETS["low"]
-    med_thresh = config.VOL_BUCKETS["medium"]
-    bucket.loc[vol <= low_thresh] = "low"
-    bucket.loc[(vol > low_thresh) & (vol <= med_thresh)] = "medium"
-    bucket.loc[vol > med_thresh] = "high"
-    one_hot = pd.get_dummies(bucket, prefix="vol_regime")
     vol_of_vol = vol.rolling(config.VOL_OF_VOL_LOOKBACK, min_periods=config.VOL_OF_VOL_LOOKBACK).std()
     features = pd.DataFrame(index=hourly.index)
     index_align = hourly.index.get_level_values("datetime_hour")
@@ -54,9 +47,6 @@ def build_regime_features(hourly):
     features["p_momentum"] = probs["p_momentum"].reindex(index_align).values
     features["p_meanreversion"] = probs["p_meanreversion"].reindex(index_align).values
     features["p_noise"] = probs["p_noise"].reindex(index_align).values
-    features["vol_regime_low"] = one_hot.get("vol_regime_low", pd.Series(dtype=float)).reindex(index_align).values
-    features["vol_regime_medium"] = one_hot.get("vol_regime_medium", pd.Series(dtype=float)).reindex(index_align).values
-    features["vol_regime_high"] = one_hot.get("vol_regime_high", pd.Series(dtype=float)).reindex(index_align).values
     features["vol_of_vol"] = vol_of_vol.reindex(index_align).values
     features.columns = [f"regime_{c}" for c in features.columns]
     return features
