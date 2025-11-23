@@ -85,6 +85,7 @@ class BacktestEngine:
             "quantity",
             "pnl",
             "pnl_pct",
+            "transaction_cost",
         ]
         trade_log = pd.DataFrame(portfolio.trade_log)
         if trade_log.empty:

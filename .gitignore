@@ -8,3 +8,10 @@ __pycache__/
 *.json
 *.csv
 .DS_Store
+*.ipynb_checkpoints
+*.log
+.vscode/
+.env
+*.ipynb
+catboost_info/
+three_barrier.py
